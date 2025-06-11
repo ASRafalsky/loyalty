@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS credentials_test CASCADE;
+
+DROP TABLE IF EXISTS users_test CASCADE;
+
+DROP TABLE IF EXISTS orders_test CASCADE;
+
+DROP TABLE IF EXISTS withdraws_test CASCADE;
