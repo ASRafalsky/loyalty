@@ -107,12 +107,20 @@ func (d DB) SetOrder(ctx context.Context, key string, data []byte) error {
 		`INSERT INTO orders (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = $2`, key, data)
 }
 
+func (d DB) UpdateOrderByID(ctx context.Context, orderID string, data []byte) error {
+	if len(orderID) != 16 {
+		return errors.New("invalid orderID length")
+	}
+	return d.set(ctx,
+		`UPDATE orders SET payload = $2 WHERE suffix = $1`, orderID, data)
+}
+
 func (d DB) SetWithdraw(ctx context.Context, key string, data []byte) error {
 	if len(key) != 32 {
 		return errors.New("invalid key length")
 	}
 	return d.set(ctx,
-		`INSERT INTO withdraw (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = $2`, key, data)
+		`INSERT INTO withdraws (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = $2`, key, data)
 }
 
 func (d DB) set(ctx context.Context, query, key string, data []byte) error {
@@ -197,7 +205,7 @@ func (d DB) GetWithdrawalsByUser(ctx context.Context, userID string) (keys []str
         SELECT id, payload 
         FROM withdraws 
         WHERE prefix = $1
-        ORDER BY (payload->>'uploaded_at')::timestamp DESC;`
+        ORDER BY (payload->>'processed_at')::timestamp DESC;`
 	return d.getRecordsBy(ctx, query, userID)
 }
 
@@ -220,7 +228,7 @@ func (d DB) getRecordsBy(ctx context.Context, query, id string) (keys []string, 
 			err = multierr.Append(err, errRollback)
 		}
 	}()
-	rows, err := d.Query(query, id)
+	rows, err := tx.QueryContext(ctx, query, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -273,21 +281,21 @@ func (d DB) deleteEntrie(ctx context.Context, query, key string) error {
 }
 
 func (d DB) ForEachCred(ctx context.Context, fn func(k string, v []byte) error) error {
-	return errorHandler(d.forEach(ctx, `SELECT id, payload FROM credentials ORDER BY id LIMIT $1 OFFSET $2`, fn))
+	return errorHandler(d.forEach(ctx, `SELECT id, payload FROM credentials WHERE id > $1 ORDER BY id LIMIT $2`, fn))
 }
 
 func (d DB) ForEachUserStat(ctx context.Context, fn func(k string, v []byte) error) error {
-	return errorHandler(d.forEach(ctx, `SELECT id, payload FROM users ORDER BY id LIMIT $1 OFFSET $2`, fn))
+	return errorHandler(d.forEach(ctx, `SELECT id, payload FROM users WHERE id > $1 ORDER BY id LIMIT $2`, fn))
 }
 
 func (d DB) ForEachOrder(ctx context.Context, fn func(k string, v []byte) error) error {
-	return errorHandler(d.forEach(ctx, `SELECT id, payload FROM orders ORDER BY id LIMIT $1 OFFSET $2`, fn))
+	return errorHandler(d.forEach(ctx, `SELECT id, payload FROM orders WHERE id > $1 ORDER BY id LIMIT $2`, fn))
 }
 
 const BatchSz = 1000
 
 func (d DB) forEach(ctx context.Context, query string, fn func(k string, v []byte) error) (err error) {
-	offset := 0
+	idx := ""
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -299,7 +307,7 @@ func (d DB) forEach(ctx context.Context, query string, fn func(k string, v []byt
 	}()
 
 	for {
-		rows, err := tx.QueryContext(ctx, query, BatchSz, offset)
+		rows, err := tx.QueryContext(ctx, query, idx, BatchSz)
 		if err != nil {
 			return err
 		}
@@ -309,15 +317,14 @@ func (d DB) forEach(ctx context.Context, query string, fn func(k string, v []byt
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			var id string
 			var payload []byte
-			if err = rows.Scan(&id, &payload); err != nil {
+			if err = rows.Scan(&idx, &payload); err != nil {
 				if closeErr := rows.Close(); closeErr != nil {
 					err = multierr.Append(err, closeErr)
 				}
 				return err
 			}
-			if err = fn(id, payload); err != nil {
+			if err = fn(idx, payload); err != nil {
 				if closeErr := rows.Close(); closeErr != nil {
 					err = multierr.Append(err, closeErr)
 				}
@@ -338,7 +345,6 @@ func (d DB) forEach(ctx context.Context, query string, fn func(k string, v []byt
 			}
 			return err
 		}
-		offset += BatchSz
 	}
 }
 

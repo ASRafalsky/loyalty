@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -93,16 +91,4 @@ func setToken(res http.ResponseWriter, req *http.Request, token string, expTime 
 		Path:     "/",
 	})
 	return nil
-}
-
-func CompareFloat64(a, b, epsilon float64) bool {
-	return math.Abs(a-b) < 1e-10
-}
-
-func main() {
-	a := 0.1 + 0.2
-	b := 0.3
-	epsilon := 1e-10 // Уровень точности
-
-	fmt.Println(CompareFloat64(a, b, epsilon)) // true
 }

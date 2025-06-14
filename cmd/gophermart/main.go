@@ -7,8 +7,10 @@ import (
 
 	"github.com/ASRafalsky/telemetry/pkg/log"
 
+	"github.com/ASRafalsky/internal/client"
 	"github.com/ASRafalsky/internal/config"
 	"github.com/ASRafalsky/internal/db/postgres"
+	"github.com/ASRafalsky/internal/repository"
 	"github.com/ASRafalsky/internal/server"
 )
 
@@ -32,7 +34,12 @@ func main() {
 		Log.Fatal("Database initialization failed", err.Error())
 	}
 
-	server.Run(ctx, db, cfg, Log)
+	repo := repository.NewExtendedRepository(db)
+	enricher := client.NewEnricher(cfg, repo)
+	if err = enricher.Run(ctx, Log); err != nil {
+		Log.Fatal("Enricher failed", err.Error())
+	}
+	server.Run(ctx, repo, cfg, Log)
 
 	Log.Info("Server stopped.")
 }

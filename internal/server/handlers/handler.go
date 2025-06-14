@@ -14,11 +14,12 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/ASRafalsky/internal/models"
+	"github.com/ASRafalsky/internal/repository"
 	"github.com/ASRafalsky/internal/server/authorization"
 	"github.com/ASRafalsky/internal/server/middleware"
 )
 
-func RegisterPostHandler(repo repository) func(http.ResponseWriter, *http.Request) {
+func RegisterPostHandler(repo repo) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
 		buf, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -82,7 +83,7 @@ func RegisterPostHandler(repo repository) func(http.ResponseWriter, *http.Reques
 	}
 }
 
-func LoginPostHandler(repo repository) func(http.ResponseWriter, *http.Request) {
+func LoginPostHandler(repo repo) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
 		buf, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -96,7 +97,6 @@ func LoginPostHandler(repo repository) func(http.ResponseWriter, *http.Request) 
 		cred := models.Credential{}
 		err = easyjson.Unmarshal(buf, &cred)
 		if err != nil {
-			fmt.Println("failed to unmarshal", err.Error())
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -107,14 +107,12 @@ func LoginPostHandler(repo repository) func(http.ResponseWriter, *http.Request) 
 
 		id, err := models.IDHash(cred.Login)
 		if err != nil {
-			fmt.Println("failed to get id of login", err.Error())
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		storedPasswdHash, err := repo.GetCred(req.Context(), id)
 		if err != nil {
-			fmt.Println("failed to unmarshal", err.Error())
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -127,13 +125,11 @@ func LoginPostHandler(repo repository) func(http.ResponseWriter, *http.Request) 
 		expirationTime := time.Now().Add(15 * time.Minute)
 		token, err := authorization.NewToken(cred.Login, expirationTime)
 		if err != nil {
-			fmt.Println("failed to create new token", err.Error())
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
 		if err := setToken(res, req, token, expirationTime); err != nil {
-			fmt.Println("failed to set token", err.Error())
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -141,7 +137,7 @@ func LoginPostHandler(repo repository) func(http.ResponseWriter, *http.Request) 
 	}
 }
 
-func OrdersPostHandler(repo repository) func(http.ResponseWriter, *http.Request) {
+func OrdersPostHandler(repo repo) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
 		buf, err := io.ReadAll(req.Body)
 		if err != nil {
@@ -193,11 +189,13 @@ func OrdersPostHandler(repo repository) func(http.ResponseWriter, *http.Request)
 			return
 		}
 
-		order, err := easyjson.Marshal(models.Order{
+		rawOrder := models.Order{
 			ID:     id,
 			TS:     time.Now(),
 			Status: "NEW",
-		})
+		}
+
+		order, err := easyjson.Marshal(rawOrder)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
 			return
@@ -206,11 +204,15 @@ func OrdersPostHandler(repo repository) func(http.ResponseWriter, *http.Request)
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		repo.PushOrder(repository.OrderInfo{
+			User:  userID,
+			Order: rawOrder,
+		})
 		res.WriteHeader(http.StatusAccepted)
 	}
 }
 
-func OrdersGetHandler(repo repository) func(http.ResponseWriter, *http.Request) {
+func OrdersGetHandler(repo repo) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if len(req.Header.Get("Content-Length")) > 0 && req.Header.Get("Content-Length") != "0" {
 			res.WriteHeader(http.StatusBadRequest)
@@ -239,16 +241,13 @@ func OrdersGetHandler(repo repository) func(http.ResponseWriter, *http.Request) 
 		}
 
 		orders := make([]models.Order, 0, len(entries))
-		fmt.Println(len(entries))
 		for i := range entries {
 			var order models.Order
 			if err = easyjson.Unmarshal(entries[i], &order); err != nil {
 				res.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			fmt.Println(i, order)
 			if len(order.Status) > 0 && order.Status != "REGISTERED" {
-				order.Status = "PROCESSED"
 				orders = append(orders, order)
 			}
 		}
@@ -259,7 +258,6 @@ func OrdersGetHandler(repo repository) func(http.ResponseWriter, *http.Request) 
 			return
 		}
 
-		fmt.Println(orders)
 		res.Header().Set("Content-Type", "application/json")
 		if _, err = res.Write(dataToSend); err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
@@ -267,13 +265,12 @@ func OrdersGetHandler(repo repository) func(http.ResponseWriter, *http.Request) 
 		}
 
 		res.WriteHeader(http.StatusOK)
-		fmt.Println("ololo", orders)
 	}
 }
 
-func BalanceGetHandler(repo repository) func(http.ResponseWriter, *http.Request) {
+func BalanceGetHandler(repo repo) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Content-Length") != "0" {
+		if len(req.Header.Get("Content-Length")) > 0 && req.Header.Get("Content-Length") != "0" {
 			res.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -288,7 +285,6 @@ func BalanceGetHandler(repo repository) func(http.ResponseWriter, *http.Request)
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-
 		entry, err := repo.GetUserStat(req.Context(), userID)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
@@ -305,7 +301,7 @@ func BalanceGetHandler(repo repository) func(http.ResponseWriter, *http.Request)
 	}
 }
 
-func WithdrawPostHandler(repo repository) func(http.ResponseWriter, *http.Request) {
+func WithdrawPostHandler(repo repo) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Content-Type") != "application/json" {
 			res.WriteHeader(http.StatusBadRequest)
@@ -352,20 +348,47 @@ func WithdrawPostHandler(repo repository) func(http.ResponseWriter, *http.Reques
 		}
 
 		var userStat models.UserStats
-		if err := easyjson.Unmarshal(entry, &userStat); err != nil {
+		if len(entry) > 0 {
+			if err = easyjson.Unmarshal(entry, &userStat); err != nil {
+				res.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if userStat.CurrentPoints == nil ||
+			(userStat.CurrentPoints != nil && *userStat.CurrentPoints < withdraw.Points) {
+			res.WriteHeader(http.StatusPaymentRequired)
+			return
+		} else {
+			*userStat.CurrentPoints -= withdraw.Points
+		}
+
+		withdrawID, err := models.IDHash(id)
+		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		if userStat.CurrentPoints != nil && *userStat.CurrentPoints < withdraw.Points {
-			res.WriteHeader(http.StatusPaymentRequired)
+		withdrawStat := models.Withdraw{
+			ID:     id,
+			TS:     time.Now(),
+			Points: withdraw.Points,
+		}
+		buf, err = easyjson.Marshal(withdrawStat)
+		if err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		*userStat.CurrentPoints -= withdraw.Points
+		if err := repo.SetWithdraw(req.Context(), userID+withdrawID, buf); err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		if userStat.WithdrawPoints != nil {
 			*userStat.WithdrawPoints += withdraw.Points
 		} else {
-			*userStat.WithdrawPoints = withdraw.Points
+			points := withdraw.Points
+			userStat.WithdrawPoints = &points
 		}
 
 		buf, err = easyjson.Marshal(userStat)
@@ -377,13 +400,14 @@ func WithdrawPostHandler(repo repository) func(http.ResponseWriter, *http.Reques
 			res.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
 		res.WriteHeader(http.StatusOK)
 	}
 }
 
-func WithdrawalsGetHandler(repo repository) func(http.ResponseWriter, *http.Request) {
+func WithdrawalsGetHandler(repo repo) func(http.ResponseWriter, *http.Request) {
 	return func(res http.ResponseWriter, req *http.Request) {
-		if req.Header.Get("Content-Length") != "0" {
+		if len(req.Header.Get("Content-Length")) > 0 && req.Header.Get("Content-Length") != "0" {
 			res.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -410,7 +434,9 @@ func WithdrawalsGetHandler(repo repository) func(http.ResponseWriter, *http.Requ
 		}
 
 		dataToSend := bytes.Join(entries, []byte(","))
-
+		dataToSend = append([]byte("["), dataToSend...)
+		dataToSend = append(dataToSend, []byte("]")[0])
+		fmt.Println(string(dataToSend))
 		res.Header().Set("Content-Type", "application/json")
 		if _, err = res.Write(dataToSend); err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
@@ -421,13 +447,15 @@ func WithdrawalsGetHandler(repo repository) func(http.ResponseWriter, *http.Requ
 	}
 }
 
-type repository interface {
+type repo interface {
 	SetCred(ctx context.Context, key string, data []byte) error
 	SetOrder(ctx context.Context, key string, data []byte) error
 	SetUserStat(ctx context.Context, key string, data []byte) error
+	SetWithdraw(ctx context.Context, key string, data []byte) error
 	GetCred(ctx context.Context, key string) ([]byte, error)
 	GetUserStat(ctx context.Context, key string) ([]byte, error)
 	GetOrderByID(ctx context.Context, key string) (string, []byte, error)
 	GetOrdersByUser(ctx context.Context, key string) ([]string, [][]byte, error)
 	GetWithdrawalsByUser(ctx context.Context, key string) ([]string, [][]byte, error)
+	PushOrder(order repository.OrderInfo)
 }

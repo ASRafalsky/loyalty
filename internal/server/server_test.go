@@ -16,13 +16,15 @@ import (
 
 	"github.com/ASRafalsky/internal/db/mockdb"
 	"github.com/ASRafalsky/internal/models"
+	"github.com/ASRafalsky/internal/repository"
 	"github.com/ASRafalsky/internal/server/middleware"
 )
 
 func TestRegisterPostHandler(t *testing.T) {
 	Log, err := log.AddLoggerWith("info", "")
 	require.NoError(t, err)
-	repo := mockdb.New()
+	db := mockdb.New()
+	repo := repository.NewExtendedRepository(db)
 	srv := httptest.NewServer(middleware.WithLogging(newRouter(repo, Log), Log))
 	defer srv.Close()
 
@@ -92,6 +94,7 @@ func TestRegisterPostHandler(t *testing.T) {
 			buf, err := easyjson.Marshal(tc.data)
 			require.NoError(t, err)
 			resp, err := client.Post(tc.url, bytes.NewReader(buf), header)
+			require.NoError(t, err)
 			require.Equal(t, tc.expStatusCode, resp.StatusCode)
 			if tc.expStatusCode == http.StatusOK {
 				require.True(t, len(resp.Header.Get("Authorization")) > 0 ||
@@ -127,23 +130,27 @@ func TestRegisterPostHandler(t *testing.T) {
 		resp, err := client.Post(srv.URL+"/api/user/orders", bytes.NewReader([]byte(order)), authHeaderUser1)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusAccepted, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
 	})
 	t.Run("set_the_same_order_for_the_same_user", func(t *testing.T) {
 		authHeaderUser1.Set("Content-Type", "text/plain")
 		resp, err := client.Post(srv.URL+"/api/user/orders", bytes.NewReader([]byte(order)), authHeaderUser1)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
 	})
 	t.Run("set_the_same_order_for_the_another_user", func(t *testing.T) {
 		authHeaderUser2.Set("Content-Type", "text/plain")
 		resp, err := client.Post(srv.URL+"/api/user/orders", bytes.NewReader([]byte(order)), authHeaderUser2)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusConflict, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
 	})
 
 	t.Run("get_order_for_the_user", func(t *testing.T) {
 		resp, err := client.Get(srv.URL+"/api/user/orders", authHeaderUser1)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.NoError(t, resp.Body.Close())
 	})
 }

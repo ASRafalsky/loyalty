@@ -7,11 +7,11 @@ import (
 )
 
 type DB struct {
-	mx sync.RWMutex
 	*cache
 }
 
 type cache struct {
+	mx        sync.RWMutex
 	creds     map[string][]byte
 	users     map[string][]byte
 	orders    map[string][]byte
@@ -34,6 +34,22 @@ func (d DB) SetCred(_ context.Context, key string, data []byte) error {
 	defer d.mx.Unlock()
 
 	d.creds[key] = data
+	return nil
+}
+
+func (d DB) UpdateOrderByID(ctx context.Context, orderID string, data []byte) error {
+	d.mx.Lock()
+	defer d.mx.Unlock()
+
+	for k := range d.orders {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if strings.HasSuffix(k, orderID) {
+			d.orders[k] = data
+			return nil
+		}
+	}
 	return nil
 }
 
@@ -142,4 +158,20 @@ func (d DB) GetWithdrawsByOrderID(ctx context.Context, orderID string) (keys str
 		}
 	}
 	return "", nil, nil
+}
+
+func (d DB) ForEachOrder(ctx context.Context, fn func(k string, v []byte) error) error {
+	d.mx.RLock()
+	defer d.mx.RUnlock()
+
+	for k, v := range d.orders {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		err := fn(k, v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -28,11 +28,11 @@ func TestCredsDB(t *testing.T) {
 	ctx := context.Background()
 
 	const (
-		cnt           = 10
+		cnt           = 200
 		insertCred    = `INSERT INTO credentials_test (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = $2`
 		selectCred    = `SELECT payload FROM credentials_test WHERE id = $1`
 		deleteCred    = `DELETE FROM credentials_test WHERE id = $1`
-		selectForEach = `SELECT id, payload FROM credentials_test ORDER BY id LIMIT $1 OFFSET $2`
+		selectForEach = `SELECT id, payload FROM credentials_test WHERE id > $1 ORDER BY id LIMIT $2`
 		insertBatch   = `INSERT INTO credentials_test (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = $2`
 	)
 
@@ -69,6 +69,11 @@ func TestCredsDB(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, credsList[i].Password, string(res))
 		}
+	})
+
+	t.Run("Get_by_invalid_key", func(t *testing.T) {
+		_, err := db.get(ctx, selectCred, "kek")
+		require.NoError(t, err)
 	})
 
 	t.Run("Update", func(t *testing.T) {
@@ -140,11 +145,11 @@ func TestOrdersDB(t *testing.T) {
 	}
 
 	const (
-		cnt           = 100
+		cnt           = 200
 		insertOrder   = `INSERT INTO orders_test (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = $2`
 		selectOrder   = `SELECT payload FROM orders_test WHERE id = $1`
 		deleteOrder   = `DELETE FROM orders_test WHERE id = $1`
-		selectForEach = `SELECT id, payload FROM orders_test ORDER BY id LIMIT $1 OFFSET $2`
+		selectForEach = `SELECT id, payload FROM orders_test WHERE id > $1 ORDER BY id LIMIT $2`
 		insertBatch   = `INSERT INTO orders_test (id, payload) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET payload = $2`
 
 		selectOrdersByUser = `SELECT id, payload
@@ -154,6 +159,7 @@ func TestOrdersDB(t *testing.T) {
 		selectOrdersByOrder = `SELECT id, payload
 								FROM orders_test
 								WHERE suffix = $1;`
+		updateOrderByOrder = `UPDATE orders_test SET payload = $2 WHERE suffix = $1`
 	)
 
 	if err = db.MigrateUp(migrationFilesPath); err != nil {
@@ -207,6 +213,15 @@ func TestOrdersDB(t *testing.T) {
 			res, err := db.get(ctx, selectOrder, keys[i])
 			require.NoError(t, err)
 			require.NoError(t, db.set(ctx, insertOrder, keys[i], res))
+			require.NoError(t, db.set(ctx, updateOrderByOrder, keys[i][16:], res))
+		}
+	})
+
+	t.Run("UpdateByOrderID", func(t *testing.T) {
+		for i := range ordersList {
+			res, err := db.get(ctx, selectOrder, keys[i])
+			require.NoError(t, err)
+			require.NoError(t, db.set(ctx, updateOrderByOrder, keys[i][16:], res))
 		}
 	})
 
