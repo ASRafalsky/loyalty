@@ -35,6 +35,6 @@ type UserStats struct {
 }
 
 type Credential struct {
-	Login    string `json:"login"`
-	Password string `json:"password"`
+	Login    string `validate:"required,min=3,max=50" json:"login"`
+	Password string `validate:"required,min=4,max=72" json:"password"`
 }
